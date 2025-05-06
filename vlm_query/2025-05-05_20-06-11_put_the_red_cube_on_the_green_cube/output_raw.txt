@@ -1,0 +1,47 @@
+```python
+# The task "put the red cube on the green cube" involves two stages:
+# 1. Grasp the red cube.
+# 2. Place the red cube on top of the green cube.
+
+num_stages = 2
+
+### stage 1 sub-goal constraints
+def stage1_subgoal_constraint1(end_effector, keypoints):
+    """Align the end-effector with the red cube."""
+    red_cube_keypoint = keypoints[0]  # Assuming the red cube is marked with keypoint index 0
+    cost = np.linalg.norm(end_effector - red_cube_keypoint)
+    return cost
+
+### stage 1 path constraints
+# No path constraints needed for grasping stage
+
+### stage 2 sub-goal constraints
+def stage2_subgoal_constraint1(end_effector, keypoints):
+    """The red cube is 10cm on top of the green cube."""
+    red_cube_keypoint = keypoints[0]  # Assuming the red cube is marked with keypoint index 0
+    green_cube_keypoint = keypoints[1]  # Assuming the green cube is marked with keypoint index 1
+    offsetted_point = green_cube_keypoint + np.array([0, 0, 0.1])  # 10cm above the green cube
+    cost = np.linalg.norm(red_cube_keypoint - offsetted_point)
+    return cost
+
+### stage 2 path constraints
+def stage2_path_constraint1(end_effector, keypoints):
+    """The robot must still be grasping the red cube."""
+    return get_grasping_cost_by_keypoint_idx(0)
+
+"""
+Summarize keypoints to be grasped in all grasping stages.
+The length of the list should be equal to the number of stages.
+For grasping stage, write the keypoint index. For non-grasping stage, write -1.
+"""
+grasp_keypoints = [0, -1]
+
+"""
+Summarize at **the end of which stage** the robot should release the keypoints.
+The keypoint indices must appear in an earlier stage as defined in `grasp_keypoints` (i.e., a keypoint can only be released only if it has been grasped previously).
+Only release object when it's necessary to complete the task, e.g., drop bouquet in the vase.
+The length of the list should be equal to the number of stages.
+If a keypoint is to be released at the end of a stage, write the keypoint index at the corresponding location. Otherwise, write -1.
+"""
+release_keypoints = [-1, 0]
+```

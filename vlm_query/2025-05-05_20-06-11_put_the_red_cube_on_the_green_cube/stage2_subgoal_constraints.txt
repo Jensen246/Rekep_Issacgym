@@ -1,0 +1,8 @@
+def stage2_subgoal_constraint1(end_effector, keypoints):
+    """The red cube is 10cm on top of the green cube."""
+    red_cube_keypoint = keypoints[0]  # Assuming the red cube is marked with keypoint index 0
+    green_cube_keypoint = keypoints[1]  # Assuming the green cube is marked with keypoint index 1
+    offsetted_point = green_cube_keypoint + np.array([0, 0, 0.1])  # 10cm above the green cube
+    cost = np.linalg.norm(red_cube_keypoint - offsetted_point)
+    return cost
+
