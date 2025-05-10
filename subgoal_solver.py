@@ -201,18 +201,16 @@ class SubgoalSolver:
             ):
         """
         Args:
-            - ee_pose (np.ndarray): [7], [x, y, z, qx, qy, qz, qw] end effector pose.
+            - ee_pose (np.ndarray): [7], [x, y, z, qx, qy, qz, qw] end effector pose，四元数格式为xyzw。
             - keypoints (np.ndarray): [M, 3] keypoint positions.
             - keypoint_movable_mask (bool): [M] boolean array indicating whether the keypoint is on the grasped object.
             - goal_constraints (List[Callable]): subgoal constraint functions.
             - path_constraints (List[Callable]): path constraint functions.
-            - sdf_voxels (np.ndarray): [X, Y, Z] signed distance field of the environment.
-            - collision_points (np.ndarray): [N, 3] point cloud of the object.
             - is_grasp_stage (bool): whether the current stage is a grasp stage.
             - initial_joint_pos (np.ndarray): [N] initial joint positions of the robot.
             - from_scratch (bool): whether to start from scratch.
         Returns:
-            - result (scipy.optimize.OptimizeResult): optimization result.
+            - sol (np.ndarray): [7], [x, y, z, qx, qy, qz, qw] 优化后的末端执行器位姿，四元数格式为xyzw。
             - debug_dict (dict): debug information.
         """
         # downsample collision points

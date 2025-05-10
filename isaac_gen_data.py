@@ -8,19 +8,11 @@ import os
 import yaml
 import imageio
 import math
-import time
-import json
-import matplotlib.pyplot as plt
-from scipy import interpolate
 
 from isaacgym import gymapi, gymtorch, gymutil
 import torch
 from transform_utils import euler2quat, convert_quat
 from utils import get_config
-from ik_solver import IKSolver  # 导入IK求解器
-
-from utils import get_config
-import environment
 
 
 class IsaacGymDataGenerator:
@@ -62,15 +54,6 @@ class IsaacGymDataGenerator:
         self.gym.simulate(self.sim)
         self.gym.fetch_results(self.sim, True)
         self.get_robot_state()
-        
-        # 初始化视图器
-        self.viewer_created = True
-        
-        # 初始化IK求解器
-        global_config = get_config(config_path='./configs/config.yaml')
-        self.env = environment.ReKepRealEnv(global_config['env'])        
-        self.ik_solver = IKSolver(reset_joint_pos=self.env.reset_joint_pos,
-                                  world2robot_homo=self.env.world2robot_homo)
 
     # -------------------------------------------------------------------------- #
     # 基础环境
@@ -93,19 +76,15 @@ class IsaacGymDataGenerator:
 
         asset_root = "./data"
         asset_file = "franka_description/robots/franka_panda.urdf"
-        self.urdf_full_path = os.path.join(asset_root, asset_file)
-        
         asset_options = gymapi.AssetOptions()
         asset_options.fix_base_link = True
         asset_options.armature = 0.01
         asset_options.disable_gravity = True
         asset_options.flip_visual_attachments = True
 
-        print(f"加载机器人：{self.urdf_full_path}")
+        print(f"加载机器人：{os.path.join(asset_root, asset_file)}")
         self.robot_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
-        
-        
-        
+
         self.env_lower = gymapi.Vec3(-self.env_spacing, -self.env_spacing, 0.0)
         self.env_upper = gymapi.Vec3(self.env_spacing, self.env_spacing, self.env_spacing)
 
@@ -122,25 +101,11 @@ class IsaacGymDataGenerator:
             props["stiffness"].fill(1000.0)
             props["damping"].fill(200.0)
             self.gym.set_actor_dof_properties(env, self.robot_handle, props)
+
             self.num_dofs = self.gym.get_asset_dof_count(self.robot_asset)
-            frank_dof_props = self.gym.get_asset_dof_properties(self.robot_asset)
-            self.franka_lower_limits = frank_dof_props["lower"]
-            self.franka_upper_limits = frank_dof_props["upper"]
-            franka_mids = 0.3 * (self.franka_upper_limits + self.franka_lower_limits)
-            self.default_dof_pos = np.zeros(self.num_dofs, dtype=np.float32)
-            self.default_dof_pos[:7] = franka_mids[:7]
-            self.default_dof_pos[7:] = self.franka_upper_limits[7:]
             self.dof_names = [self.gym.get_asset_dof_name(self.robot_asset, j) for j in range(self.num_dofs)]
             self.finger_joints_indices = [j for j, n in enumerate(self.dof_names)
                                           if n in ('panda_finger_joint1', 'panda_finger_joint2')]
-        # 设置初始关节位置
-        self.gym.set_actor_dof_position_targets(
-            self.envs[0], self.robot_handle, self.default_dof_pos)
-        
-        for _ in range(100):
-            self.gym.simulate(self.sim)
-            self.gym.fetch_results(self.sim, True)
-
 
     def add_box(self):
         box_size_small = 0.03
@@ -154,13 +119,10 @@ class IsaacGymDataGenerator:
                                               box_size_large, box_size_large, box_asset_options)
 
         box1_pose = gymapi.Transform()
-        box1_pose.p = gymapi.Vec3(0.3, -0.3, box_size_small / 2 + 0.001)
-        # 使用直接的四元数值设置旋转45度（绕Z轴）
-        # 四元数格式[x,y,z,w]，绕Z轴旋转45度 = [0, 0, sin(45°/2), cos(45°/2)]
-        box1_pose.r = gymapi.Quat(0.0, 0.0, 0.3826834, 0.9238795)
+        box1_pose.p = gymapi.Vec3(0.5, -0.5, box_size_small / 2 + 0.001)
 
         box2_pose = gymapi.Transform()
-        box2_pose.p = gymapi.Vec3(0.3, 0.3, box_size_large / 2 + 0.001)
+        box2_pose.p = gymapi.Vec3(0.5, 0.5, box_size_large / 2 + 0.001)
 
         # boxes segmentationId=101 / 102
         self.box1_handle = self.gym.create_actor(
@@ -210,7 +172,7 @@ class IsaacGymDataGenerator:
         self.dof_states = self.gym.get_actor_dof_states(self.envs[0], self.robot_handle, gymapi.STATE_ALL)
         self.dof_positions = [self.dof_states[i]['pos'] for i in range(self.num_dofs)]
         self.hand_handle = self.gym.find_actor_rigid_body_handle(self.envs[0], self.robot_handle, "panda_hand")
-        self.base_footprint = self.gym.find_actor_rigid_body_handle(self.envs[0], self.robot_handle, "panda_link0")
+
     # -------------------------------------------------------------------------- #
     # 相机数据
     # -------------------------------------------------------------------------- #
@@ -349,38 +311,7 @@ class IsaacGymDataGenerator:
         # 生成并保存点云
         self._save_point_cloud(depth)
 
-        # 获取并保存panda hand的6D姿态
-        hand_transform = self.gym.get_rigid_transform(self.envs[0], self.hand_handle)
-        hand_pose = [
-            float(hand_transform.p.x),
-            float(hand_transform.p.y),
-            float(hand_transform.p.z),
-            float(hand_transform.r.x),
-            float(hand_transform.r.y),
-            float(hand_transform.r.z),
-            float(hand_transform.r.w)
-        ]
-        
-        base_footprint_transform = self.gym.get_rigid_transform(self.envs[0], self.base_footprint)
-        base_footprint_pose = [
-            float(base_footprint_transform.p.x),
-            float(base_footprint_transform.p.y),
-            float(base_footprint_transform.p.z),
-            float(base_footprint_transform.r.x),
-            float(base_footprint_transform.r.y),
-            float(base_footprint_transform.r.z),
-            float(base_footprint_transform.r.w)
-        ]
-        
-        # 将姿态保存为JSON文件
-        json_path = os.path.join(self.camera_data_path, "hand&base_pose.json")
-        with open(json_path, 'w') as f:
-            json.dump({
-                "hand_pose": hand_pose,
-                "base_footprint_pose": base_footprint_pose
-            }, f, indent=4)
-
-        print(f"Camera&robot_pose data saved to {self.camera_data_path}")
+        print(f"Camera data saved to {self.camera_data_path}")
 
     # -------------------------------------------------------------------------- #
     # 主循环
@@ -414,178 +345,6 @@ class IsaacGymDataGenerator:
         print("查看器已关闭，清理资源...")
         self.gym.destroy_viewer(self.viewer)
         self.gym.destroy_sim(self.sim)
-
-    def exec_path(self, stage_result_list):
-        """执行所有阶段的路径"""
-        # 只有在未创建视图器时才创建
-        if not self.viewer_created:
-            self.create_viewer()
-            self.viewer_created = True
-        
-        # 执行每个阶段
-        for stage_result in stage_result_list:
-            if stage_result['is_grasp_stage']:
-                self.set_gripper(1.0)  # 打开夹爪
-            else:
-                self.set_gripper(0.0)  # 关闭夹爪
-                
-            # 执行路径
-            self.plan_and_execute_path(
-                stage_result['path'], 
-                is_grasp_stage=stage_result['is_grasp_stage'],
-                is_release_stage=stage_result['is_release_stage']
-            )
-            
-            if stage_result['is_release_stage']:
-                self.set_gripper(1.0)  # 打开夹爪
-            else:
-                self.set_gripper(0.0)  # 关闭夹爪
-            
-        print("所有阶段执行完成")
-        
-        # 保持窗口打开，直到用户关闭
-        while not self.gym.query_viewer_has_closed(self.viewer):
-            # 更新物理和渲染
-            self.gym.simulate(self.sim)
-            self.gym.fetch_results(self.sim, True)
-            self.gym.step_graphics(self.sim)
-            self.gym.draw_viewer(self.viewer, self.sim, False)
-            self.gym.sync_frame_time(self.sim)
-            
-            # 检查退出事件
-            for evt in self.gym.query_viewer_action_events(self.viewer):
-                if evt.action == "QUIT" and evt.value > 0:
-                    return
-    
-    def plan_and_execute_path(self, end_effector_path, is_grasp_stage=False, is_release_stage=False):
-        """执行端点轨迹
-        Args:
-            end_effector_path: 末端执行器路径，每个点是一个[x,y,z,qx,qy,qz,qw]数组
-            is_grasp_stage: 是否是抓取阶段
-            is_release_stage: 是否是释放阶段
-        """
-        print(f"执行路径: {len(end_effector_path)}个点")
-        
-        # 遍历路径中的每个位姿
-        for i, pose in enumerate(end_effector_path):
-            print(f"执行位姿 {i+1}/{len(end_effector_path)}")
-            self.move_to_pose(pose, is_grasp_stage, is_release_stage)
-            
-            # 等待机器人达到位置
-            # time.sleep(0.5)
-
-    def move_to_pose(self, target_pose, is_grasp_stage, is_release_stage):
-        """使用IK求解器移动到指定位姿
-        Args:
-            target_pose: 目标位姿，[x,y,z,qx,qy,qz,qw]格式
-        """
-        # 使用IK求解器计算关节角度
-        ik_result = self.ik_solver.solve(target_pose=target_pose, start_joint_pos=self.dof_positions[:7])
-        
-        if ik_result.success:
-            # 获取计算出的关节角度
-            joint_positions = ik_result.cspace_position
-            if is_grasp_stage:
-                joint_positions = np.concatenate([joint_positions, [0.04, 0.04]]).astype(np.float32)
-            elif is_release_stage:
-                joint_positions = np.concatenate([joint_positions, [0.0, 0.0]]).astype(np.float32)
-            # 设置关节位置目标
-            self.gym.set_actor_dof_position_targets(
-                self.envs[0], self.robot_handle, joint_positions)
-            for _ in range(100):
-                self.gym.simulate(self.sim)
-                self.gym.fetch_results(self.sim, True)
-                self.gym.step_graphics(self.sim)
-                if self.viewer_created:
-                    self.gym.draw_viewer(self.viewer, self.sim, False)
-                    self.gym.sync_frame_time(self.sim)
-
-        else:
-            print(f"IK求解失败: {ik_result.status}")
-        
-        # 运行模拟一段时间以让机器人移动到目标
-        steps = 100
-        for _ in range(steps):
-            self.gym.simulate(self.sim)
-            self.gym.fetch_results(self.sim, True)
-            self.gym.step_graphics(self.sim)
-            
-            if self.viewer_created:
-                self.gym.draw_viewer(self.viewer, self.sim, False)
-                self.gym.sync_frame_time(self.sim)
-        
-        # 更新机器人状态
-        self.get_robot_state()
-        
-        # 获取当前末端执行器位姿
-        hand_transform = self.gym.get_rigid_transform(self.envs[0], self.hand_handle)
-        
-        # 计算位置误差
-        pos_error = np.sqrt(
-            (hand_transform.p.x - target_pose[0])**2 + 
-            (hand_transform.p.y - target_pose[1])**2 + 
-            (hand_transform.p.z - target_pose[2])**2
-        )
-        
-        # 计算姿态误差（四元数）
-        quat_error = np.sqrt(
-            (hand_transform.r.x - target_pose[3])**2 + 
-            (hand_transform.r.y - target_pose[4])**2 + 
-            (hand_transform.r.z - target_pose[5])**2 + 
-            (hand_transform.r.w - target_pose[6])**2
-        )
-        
-        # 打印位姿对比和误差
-        print("\n--------- 位姿对比 ---------")
-        print(f"目标位置: [{target_pose[0]:.4f}, {target_pose[1]:.4f}, {target_pose[2]:.4f}]")
-        print(f"实际位置: [{hand_transform.p.x:.4f}, {hand_transform.p.y:.4f}, {hand_transform.p.z:.4f}]")
-        print(f"位置误差: {pos_error:.4f}")
-        print(f"目标姿态: [{target_pose[3]:.4f}, {target_pose[4]:.4f}, {target_pose[5]:.4f}, {target_pose[6]:.4f}]")
-        print(f"实际姿态: [{hand_transform.r.x:.4f}, {hand_transform.r.y:.4f}, {hand_transform.r.z:.4f}, {hand_transform.r.w:.4f}]")
-        print(f"姿态误差: {quat_error:.4f}")
-        print("---------------------------\n")
-
-    def set_gripper(self, position, steps=50):
-        """设置夹爪位置
-        
-        Args:
-            position: 位置值，0表示闭合，1表示打开
-            steps: 执行步数
-        """
-        current_positions = self.dof_positions[-2:]
-        target_positions = [position, position]
-        
-        # 创建完整的关节位置数组
-        full_targets = np.array(self.dof_positions)
-        
-        for i in range(steps):
-            t = (i + 1) / steps
-            
-            # 线性插值
-            interp_positions = [
-                current_positions[j] * (1-t) + target_positions[j] * t
-                for j in range(2)
-            ]
-            
-            # 更新夹爪关节位置
-            for j, idx in enumerate(self.finger_joints_indices):
-                full_targets[idx] = interp_positions[j]
-            
-            # 设置所有关节位置目标
-            self.gym.set_actor_dof_position_targets(self.envs[0], self.robot_handle, full_targets)
-            
-            # 执行模拟步骤
-            self.gym.simulate(self.sim)
-            self.gym.fetch_results(self.sim, True)
-            self.gym.step_graphics(self.sim)
-            
-            # 更新显示
-            if self.viewer_created:
-                self.gym.draw_viewer(self.viewer, self.sim, False)
-                self.gym.sync_frame_time(self.sim)
-        
-        # 更新当前夹爪位置
-        self.get_robot_state()
 
 
 if __name__ == "__main__":

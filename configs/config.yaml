@@ -52,8 +52,8 @@ env:
     data_dir: ./data/sensor
 
 path_solver:
-  opt_pos_step_size: 0.20  # controls the density of control points in the path
-  opt_rot_step_size: 0.78  # controls the density of control points in the path
+  opt_pos_step_size: 0.10  # controls the density of control points in the path
+  opt_rot_step_size: 0.39  # controls the density of control points in the path
   opt_interpolate_pos_step_size: 0.02  # controls the density of collision checking inside optimization
   opt_interpolate_rot_step_size: 0.10
   max_collision_points: 60

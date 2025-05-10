@@ -1,9 +1,8 @@
-import torch
 import numpy as np
-import json
-import os
-import argparse
+import os,json,argparse,pickle
 
+from isaac_gen_data_path import IsaacGymDataGenerator
+import torch
 from environment import ReKepRealEnv
 from keypoint_proposal import KeypointProposer
 from constraint_generation import ConstraintGenerator
@@ -14,6 +13,7 @@ from subgoal_solver import SubgoalSolver
 from path_solver import PathSolver
 
 from visualizer import Visualizer
+
 
 from utils import (
     bcolors,
@@ -44,6 +44,7 @@ class Main:
             world2robot_homo=self.env.world2robot_homo,
         )
         # initialize solvers
+        self.ik_solver = ik_solver
         self.subgoal_solver = SubgoalSolver(global_config['subgoal_solver'], ik_solver, self.env.reset_joint_pos)
         self.path_solver = PathSolver(global_config['path_solver'], ik_solver, self.env.reset_joint_pos)
         # initialize visualizer
@@ -94,76 +95,40 @@ class Main:
         
         # main loop
         # self.last_sim_step_counter = -np.inf
+        self.stage_result_list = []
         self._update_stage(1)
         while True:
+            stage_result = dict()
+            stage_result['is_grasp_stage'] = self.is_grasp_stage    
+            stage_result['is_release_stage'] = self.is_release_stage
+            
             scene_keypoints = self.env.get_keypoint_positions()
             self.keypoints = np.concatenate([[self.env.get_ee_pos()], scene_keypoints], axis=0)  # first keypoint is always the ee
             self.curr_ee_pose = self.env.get_ee_pose()
             self.curr_joint_pos = self.env.get_arm_joint_pos()
-            # ====================================
-            # = decide whether to backtrack
-            # ====================================
-            # backtrack = False
-            # if self.stage > 1:
-            #     path_constraints = self.constraint_fns[self.stage]['path']
-            #     for constraints in path_constraints:
-            #         violation = constraints(self.keypoints[0], self.keypoints[1:])
-            #         if violation > self.config['constraint_tolerance']:
-            #             backtrack = True
-            #             break
-            # if backtrack:
-            #     # determine which stage to backtrack to based on constraints
-            #     for new_stage in range(self.stage - 1, 0, -1):
-            #         path_constraints = self.constraint_fns[new_stage]['path']
-            #         # if no constraints, we can safely backtrack
-            #         if len(path_constraints) == 0:
-            #             break
-            #         # otherwise, check if all constraints are satisfied
-            #         all_constraints_satisfied = True
-            #         for constraints in path_constraints:
-            #             violation = constraints(self.keypoints[0], self.keypoints[1:])
-            #             if violation > self.config['constraint_tolerance']:
-            #                 all_constraints_satisfied = False
-            #                 break
-            #         if all_constraints_satisfied:   
-            #             break
-            #     print(f"{bcolors.HEADER}[stage={self.stage}] backtrack to stage {new_stage}{bcolors.ENDC}")
-            #     self._update_stage(new_stage)
-            # else:
-            # ====================================
-            # = get optimized plan
-            # ====================================
-            # if self.last_sim_step_counter == self.env.step_counter:
-            #     print(f"{bcolors.WARNING}sim did not step forward within last iteration (HINT: adjust action_steps_per_iter to be larger or the pos_threshold to be smaller){bcolors.ENDC}")
-            next_subgoal = self._get_next_subgoal(from_scratch=self.first_iter)
+            
+            next_subgoal, ik_result = self._get_next_subgoal(from_scratch=self.first_iter)
             next_path = self._get_next_path(next_subgoal, from_scratch=self.first_iter)
             
-            # self.first_iter = False
-            # self.action_queue = next_path.tolist()
-            # self.last_sim_step_counter = self.env.step_counter
-            # ====================================
-            # = execute
-            # ====================================
-            # determine if we proceed to the next stage
-            # count = 0
-            # while len(self.action_queue) > 0 and count < self.config['action_steps_per_iter']:
-            #     next_action = self.action_queue.pop(0)
-            #     precise = len(self.action_queue) == 0
-            #     self.env.execute_action(next_action, precise=precise)
-            #     count += 1
-            # if len(self.action_queue) == 0:
-            #     if self.is_grasp_stage:
-            #         self._execute_grasp_action()
-            #     elif self.is_release_stage:
-            #         self._execute_release_action()
-            #     # if completed, save video and return
-            #     if self.stage == self.program_info['num_stages']: 
-            #         self.env.sleep(2.0)
-            #         save_path = self.env.save_video()
-            #         print(f"{bcolors.OKGREEN}Video saved to {save_path}\n\n{bcolors.ENDC}")
-            #         return
-            #     # progress to next stage
-            #     self._update_stage(self.stage + 1)
+            self.first_iter = False
+            stage_result['subgoal_pose'] = next_subgoal
+            stage_result['path'] = next_path[:, :7]
+            stage_result['ik_result'] = ik_result
+            
+            self.stage_result_list.append(stage_result)
+            
+            # 完成所有阶段后执行，再退出
+            if self.stage == self.program_info['num_stages']:
+                # print(self.stage_result_list)
+                pickle.dump(self.stage_result_list, open(os.path.join('test', 'stage_result_list.pkl'), 'wb'))
+                # self.exec_path(self.stage_result_list)
+                return
+            self.curr_joint_pos = ik_result.cspace_position
+            self.env.curr_joint_pos = self.curr_joint_pos
+            self.curr_ee_pose = next_subgoal
+            self.env.curr_ee_pose = self.curr_ee_pose
+            # 进入下一阶段
+            self._update_stage(self.stage + 1)
         
     def _update_stage(self, stage):
         # update stage
@@ -196,12 +161,16 @@ class Main:
         subgoal_pose_homo = T.convert_pose_quat2mat(subgoal_pose)
         # if grasp stage, back up a bit to leave room for grasping
         if self.is_grasp_stage:
-            subgoal_pose[:3] += subgoal_pose_homo[:3, :3] @ np.array([-self.config['grasp_depth'] / 2.0, 0, 0])
+            subgoal_pose[:3] += subgoal_pose_homo[:3, :3] @ np.array([0, 0, -self.config['grasp_depth'] / 2.0])
+        elif self.is_release_stage:
+            subgoal_pose[:3] += subgoal_pose_homo[:3, :3] @ np.array([0, 0, -self.config['grasp_depth'] / 2.0])
+        
         debug_dict['stage'] = self.stage
         print_opt_debug_dict(debug_dict)
         if self.visualize:
             self.visualizer.visualize_subgoal(subgoal_pose)
-        return subgoal_pose
+        ik_result = self.ik_solver.solve(subgoal_pose, self.curr_joint_pos)
+        return subgoal_pose, ik_result
 
     def _process_path(self, path):
         # spline interpolate the path from the current ee pose
@@ -213,6 +182,7 @@ class Main:
                                                     self.config['interpolate_pos_step_size'],
                                                     self.config['interpolate_rot_step_size'])
         dense_path = spline_interpolate_poses(full_control_points, num_steps)
+        
         # # add gripper action
         # ee_action_seq = np.zeros((dense_path.shape[0], 8))
         # ee_action_seq[:, :7] = dense_path
@@ -231,10 +201,22 @@ class Main:
                                                     self.curr_joint_pos,
                                                     from_scratch=from_scratch)
         print_opt_debug_dict(debug_dict)
-        processed_path = self._process_path(path)
+        # processed_path = self._process_path(path)
+        # if self.visualize:
+        #     self.visualizer.visualize_path(processed_path)
+        # return processed_path
         if self.visualize:
-            self.visualizer.visualize_path(processed_path)
-        return processed_path
+            self.visualizer.visualize_path(path)
+        return path
+
+    def exec_path(self, stage_result_list):
+        """执行规划的路径
+        
+        Args:
+            stage_result_list: 包含各阶段路径信息的列表
+        """
+        isaac_data_generator = IsaacGymDataGenerator()
+        isaac_data_generator.exec_path(stage_result_list)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

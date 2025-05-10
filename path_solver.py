@@ -87,17 +87,10 @@ def objective(opt_vars,
         if ik_result.success:
             ik_result_list.append(ik_result)
             
-            # # 控制夹爪在移动过程中尽可能保持向下
-            # preferred_dir = np.array([0, 0, -1]) 
-            # grasp_cost = -np.dot(poses_homo[idx][:3, 2], preferred_dir) + 1  # [0, 1] # panda 机器人的夹爪方向是 panda_hand 的 z 轴方向
-            # grasp_cost = 1.0 * grasp_cost
-            # debug_dict['grasp_cost'] = grasp_cost
-            # cost += grasp_cost
-            
             if idx > 0: # 从第二个控制点开始计算 ik 代价，使用相邻两个控制点的关节角差值的L2范数
                 pre_ik_result = ik_result_list[idx-1]
                 ik_cost = np.linalg.norm(ik_result.cspace_position[:-1] - pre_ik_result.cspace_position[:-1])
-                cost += 10 * ik_cost # TODO:系数需要调参
+                cost += 5 * ik_cost # TODO:系数需要调参
             idx += 1
             if isinstance(reset_joint_pos, torch.Tensor):
                 reset_joint_pos_np = reset_joint_pos.detach().cpu().numpy()
@@ -217,18 +210,16 @@ class PathSolver:
             from_scratch=False):
         """
         Args:
-            - start_pose (np.ndarray): [7], [x, y, z, qx, qy, qz, qw]
-            - end_pose (np.ndarray): [7], [x, y, z, qx, qy, qz, qw]
+            - start_pose (np.ndarray): [7], [x, y, z, qx, qy, qz, qw] - 四元数格式为xyzw
+            - end_pose (np.ndarray): [7], [x, y, z, qx, qy, qz, qw] - 四元数格式为xyzw
             - keypoints (np.ndarray): [num_keypoints, 3]
             - keypoint_movable_mask (bool): whether the keypoints are on the object being grasped
             - path_constraints (List[Callable]): path constraints
-            - sdf_voxels (np.ndarray): [H, W, D]
-            - collision_points (np.ndarray): [num_points, 3], point cloud of the object being grasped
             - initial_joint_pos (np.ndarray): [N] initial joint positions of the robot.
             - from_scratch (bool): whether to start from scratch
 
         Returns:
-            - opt_result (scipy.optimize.OptimizeResult): optimization opt_result
+            - poses_quat (np.ndarray): [num_poses, 7] - 每个位姿为[x, y, z, qx, qy, qz, qw]，四元数格式为xyzw
             - debug_dict (dict): debug information
         """
         # downsample collision points

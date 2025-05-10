@@ -9,6 +9,10 @@ from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import RotationSpline
 import transform_utils as T
 import yaml
+import imageio
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+from transform_utils import convert_quat
 
 # ===============================================
 # = optimization utils
@@ -85,6 +89,17 @@ def batch_transform_points(points, transforms):
 
 @njit(cache=True, fastmath=True)
 def get_samples_jitted(control_points_homo, control_points_quat, opt_interpolate_pos_step_size, opt_interpolate_rot_step_size):
+    """Calculate dense path from control points.
+    Args:
+        control_points_homo: [N, 4, 4] homogeneous transformation matrices
+        control_points_quat: [N, 7] position + quaternion (xyzw)
+        opt_interpolate_pos_step_size: max position step size in meters
+        opt_interpolate_rot_step_size: max rotation step size in radians
+    
+    Returns:
+        samples_7: [num_samples, 7] position + quaternion (xyzw) 
+        num_samples: number of samples
+    """
     assert control_points_homo.shape[1:] == (4, 4)
     # calculate number of samples per segment
     num_samples_per_segment = np.empty(len(control_points_homo) - 1, dtype=np.int64)
@@ -169,7 +184,8 @@ def get_clock_time(milliseconds=False):
         return f'{curr_time.hour}:{curr_time.minute}:{curr_time.second}'
 
 def angle_between_quats(q1, q2):
-    """Angle between two quaternions"""
+    """Angle between two quaternions in xyzw format"""
+    # 确保两个四元数都是xyzw格式
     return 2 * np.arccos(np.clip(np.abs(np.dot(q1, q2)), -1, 1))
 
 def filter_points_by_bounds(points, bounds_min, bounds_max, strict=True):

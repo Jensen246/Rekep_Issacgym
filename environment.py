@@ -16,6 +16,7 @@ from utils import (
     angle_between_quats,
     get_linear_interpolation_steps,
     linear_interpolate_poses,
+    convert_quat,
 )
 class ReKepRealEnv:
     """模拟真实环境的类，替代OmniGibson环境"""
@@ -35,14 +36,26 @@ class ReKepRealEnv:
         self._keypoint2object = None
         
         # 重置关节角
-        self.reset_joint_pos = tensor([0,0,0,0,0,0,0])
+        self.reset_joint_pos = tensor([0.0, -0.7, 0.0, -2.0, 0.0, 1.5, 0.0])
         self.curr_joint_pos = self.reset_joint_pos
-        # np.array([ 0.2200, -0.9412, -0.6413,  1.5519,  1.6567, -0.9322,  1.5342,  2.1447])
-        init_ee_pose_pos = np.array([0.107, 0.0, 0.925])
-        init_ee_pose_quat = np.array([-0.013, 0.923, -0.382, -0.032])
-        self.init_ee_pose_tuple = (init_ee_pose_pos, init_ee_pose_quat)
-        self.curr_ee_pose = np.concatenate([init_ee_pose_pos, init_ee_pose_quat])
-        self.world2robot_homo = T.pose_inv(T.pose2mat(self.init_ee_pose_tuple))        
+        
+        # 从hand_pose.json文件中读取初始末端执行器位姿
+        pose_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data/sensor/hand&base_pose.json')
+        
+        with open(pose_file, 'r') as f:
+            pose_data = json.load(f)
+            base_pos = np.array(pose_data["base_footprint_pose"][:3])
+            base_quat = np.array(pose_data["base_footprint_pose"][3:])
+            hand_pos = np.array(pose_data["hand_pose"][:3])
+            hand_quat = np.array(pose_data["hand_pose"][3:])
+        
+        self.init_base_pose_tuple = (base_pos, base_quat)
+        self.curr_base_pose = np.concatenate([base_pos, base_quat])
+        self.world2robot_homo = T.pose_inv(T.pose2mat(self.init_base_pose_tuple))
+        
+        self.init_ee_pose_tuple = (hand_pos, hand_quat)
+        self.curr_ee_pose = np.concatenate([hand_pos, hand_quat])
+            
         
     def get_cam_obs(self):
         """获取所有相机的观测数据"""
