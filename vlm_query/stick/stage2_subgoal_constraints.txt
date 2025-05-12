@@ -1,0 +1,6 @@
+def stage2_subgoal_constraint1(end_effector, keypoints):
+    """The stick (keypoint 0) is directly above the green cube (keypoint 1)."""
+    offsetted_point = keypoints[1] + np.array([0, 0, 0.1])  # 0.1cm above the green cube
+    cost = np.linalg.norm(end_effector - offsetted_point)
+    return cost
+

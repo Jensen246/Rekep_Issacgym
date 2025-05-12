@@ -135,20 +135,13 @@ class ConstraintGenerator:
         cv2.imwrite(image_path, img[..., ::-1])
         # build prompt
         messages = self._build_prompt(image_path, instruction)
+        print("Generating constraints...")
         # stream back the response
         outputChatCompletion = self.client.chat.completions.create(model=self.config['model'],
                                                         messages=messages,
                                                         temperature=self.config['temperature'],
                                                         max_tokens=self.config['max_tokens'],
                                                         stream=False)
-        # output = ""
-        # start = time.time()
-        # for chunk in stream:
-        #     print(f'[{time.time()-start:.2f}s] Querying OpenAI API...', end='\r')
-        #     if chunk.choices[0].delta.content is not None:
-        #         output += chunk.choices[0].delta.content
-        # print(f'[{time.time()-start:.2f}s] Querying OpenAI API...Done')
-        # save raw output
         output = outputChatCompletion.choices[0].message.content
         with open(os.path.join(self.task_dir, 'output_raw.txt'), 'w') as f:
             f.write(output)

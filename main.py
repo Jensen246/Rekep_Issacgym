@@ -119,9 +119,8 @@ class Main:
             
             # 完成所有阶段后执行，再退出
             if self.stage == self.program_info['num_stages']:
-                # print(self.stage_result_list)
                 pickle.dump(self.stage_result_list, open(os.path.join('test', 'stage_result_list.pkl'), 'wb'))
-                # self.exec_path(self.stage_result_list)
+                self.exec_path(self.stage_result_list)
                 return
             self.curr_joint_pos = ik_result.cspace_position
             self.env.curr_joint_pos = self.curr_joint_pos
@@ -220,7 +219,7 @@ class Main:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', type=str, default='cube', help='task to perform')
+    parser.add_argument('--task', type=str, default='stick', help='task to perform')
     parser.add_argument('--use_cached_query', default=True, action='store_true', help='instead of querying the VLM, use the cached query')
     parser.add_argument('--visualize', default=True, action='store_true', help='visualize each solution before executing (NOTE: this is blocking and needs to press "ESC" to continue)')
     args = parser.parse_args()
@@ -228,7 +227,11 @@ if __name__ == "__main__":
     task_list = {
         'cube': {
             'instruction': 'put the red cube on the green cube',
-            'rekep_program_dir': './vlm_query/cube',
+            'rekep_program_dir': './vlm_query/bigger_cube',
+            },
+        'stick': {
+            'instruction': 'grasp the center of the stick and put it on the green cube',
+            'rekep_program_dir': './vlm_query/stick',
             },
     }
     task = task_list[args.task]
